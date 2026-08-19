@@ -201,3 +201,88 @@ export const IconTerminal = (p: P) =>
       <path d="M12.5 15H17" />
     </>
   );
+
+export const IconPlay = (p: P) =>
+  base(p, <path d="M7 4.8v14.4c0 .8.9 1.3 1.6.9l11-7.2c.6-.4.6-1.4 0-1.8l-11-7.2c-.7-.4-1.6.1-1.6.9Z" fill="currentColor" stroke="none" />);
+
+export const IconShare = (p: P) =>
+  base(
+    p,
+    <>
+      <circle cx="6" cy="12" r="2.6" />
+      <circle cx="17.5" cy="5.5" r="2.6" />
+      <circle cx="17.5" cy="18.5" r="2.6" />
+      <path d="m8.4 10.7 6.8-4M8.4 13.3l6.8 4" />
+    </>
+  );
+
+export const IconHome = (p: P) =>
+  base(
+    p,
+    <>
+      <path d="m4 11 8-7 8 7" />
+      <path d="M6 9.5V20h12V9.5" />
+      <path d="M10 20v-5h4v5" />
+    </>
+  );
+
+export const IconPencil = (p: P) =>
+  base(
+    p,
+    <>
+      <path d="M4 20h4.5L20 8.5a2.1 2.1 0 0 0-3-3L5.5 17 4 20Z" />
+      <path d="m14.5 7 3 3" />
+    </>
+  );
+
+export const IconChat = (p: P) =>
+  base(
+    p,
+    <>
+      <path d="M21 12a8 8 0 0 1-8 8H4l2.3-2.9A8 8 0 1 1 21 12Z" />
+      <path d="M8.5 10.5h7M8.5 13.5h4.5" />
+    </>
+  );
+
+export const IconGrid = (p: P) =>
+  base(
+    p,
+    <>
+      <rect x="4" y="4" width="7" height="7" rx="1.5" />
+      <rect x="13" y="4" width="7" height="7" rx="1.5" />
+      <rect x="4" y="13" width="7" height="7" rx="1.5" />
+      <rect x="13" y="13" width="7" height="7" rx="1.5" />
+    </>
+  );
+
+export const IconClock = (p: P) =>
+  base(
+    p,
+    <>
+      <circle cx="12" cy="12" r="8.5" />
+      <path d="M12 7.5V12l3 2" />
+    </>
+  );
+
+export const IconSend = (p: P) =>
+  base(p, <path d="M4 11.5 20 4l-4.5 16-4-6.5L4 11.5Z" fill="currentColor" stroke="none" />);
+
+export const IconSliders = (p: P) =>
+  base(
+    p,
+    <>
+      <path d="M4 7h9M17 7h3M4 17h3M11 17h9M4 12h13" />
+      <circle cx="15" cy="7" r="2" />
+      <circle cx="9" cy="17" r="2" />
+    </>
+  );
+
+export const IconNote = (p: P) =>
+  base(
+    p,
+    <>
+      <path d="M5 4.5h14A1.5 1.5 0 0 1 20.5 6v9L16 19.5H5A1.5 1.5 0 0 1 3.5 18V6A1.5 1.5 0 0 1 5 4.5Z" />
+      <path d="M16 19.5V15h4.5" />
+      <path d="M7 9h10M7 12.5h6" />
+    </>
+  );

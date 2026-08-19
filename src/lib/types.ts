@@ -62,6 +62,24 @@ export const LAYOUTS: { id: LayoutKind; label: string }[] = [
   { id: "closing", label: "Closing" },
 ];
 
+/** When switching a card to stats/quote, seed editable content so it never renders empty. */
+export function seedLayoutPatch(slide: SlideData, layout: LayoutKind): Partial<SlideData> {
+  const patch: Partial<SlideData> = { layout };
+  if (layout === "stats" && (!slide.stats || slide.stats.length === 0)) {
+    patch.stats = [
+      { value: "42%", label: "headline number — click to edit" },
+      { value: "3×", label: "supporting metric — click to edit" },
+    ];
+  }
+  if (layout === "quote" && !slide.quote?.text) {
+    patch.quote = {
+      text: slide.bullets[0] ?? "A line worth remembering",
+      attribution: slide.quote?.attribution ?? "",
+    };
+  }
+  return patch;
+}
+
 export const DEFAULT_SETTINGS: EngineSettings = {
   engine: "local",
   apiKey: "",

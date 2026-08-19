@@ -1,326 +1,472 @@
-import { CSSProperties } from "react";
-import { DeckTheme } from "../lib/themes";
-import { SlideData } from "../lib/types";
+/* ------------------------------------------------------------------ */
+/*  SlideCard — renders one slide of deck JSON in a 960×540 design     */
+/*  space, scaled to any width. Inline-editable when `interactive`.    */
+/* ------------------------------------------------------------------ */
 
-interface Props {
+import { CSSProperties, ReactNode, useEffect, useRef, useState } from "react";
+import { DeckTheme } from "../lib/themes";
+import { SlideData, Stat } from "../lib/types";
+
+const W = 960;
+const H = 540;
+
+export interface SlideCardProps {
   slide: SlideData;
   deckTitle: string;
   theme: DeckTheme;
-  index: number;
-  total: number;
-  selected?: boolean;
-  onSelect?: () => void;
+  width: number;
+  interactive?: boolean;
+  onPatch?: (patch: Partial<SlideData>) => void;
+  toolbar?: ReactNode;
+  showNumber?: boolean;
+  className?: string;
 }
 
-/* Renders one slide of deck JSON as a true 16:9 card. All sizes use
-   container-query units (cqi) so cards scale perfectly at any width. */
-export default function SlideCard({ slide, deckTitle, theme: t, index, total, selected, onSelect }: Props) {
-  const bulletSize = slide.bullets.length > 4 ? "2.5cqi" : "2.85cqi";
+/* ------------------------------ inline edit ------------------------------ */
 
-  const kicker = (
-    <div
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: "1.3cqi",
-        fontSize: "1.85cqi",
-        letterSpacing: "0.2em",
-        fontWeight: 700,
-        color: t.accent,
-        textTransform: "uppercase",
-        whiteSpace: "nowrap",
-        overflow: "hidden",
-      }}
-    >
-      <span style={{ width: "1.15cqi", height: "1.15cqi", background: t.accent, flexShrink: 0 }} />
-      <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{deckTitle || "Untitled deck"}</span>
-    </div>
-  );
+function InlineText({
+  value,
+  onCommit,
+  editable,
+  multiline = false,
+  rows = 2,
+  className = "",
+  placeholder = "Click to edit",
+}: {
+  value: string;
+  onCommit: (v: string) => void;
+  editable: boolean;
+  multiline?: boolean;
+  rows?: number;
+  className?: string;
+  placeholder?: string;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(value);
+  const ref = useRef<HTMLInputElement | null>(null);
+  const areaRef = useRef<HTMLTextAreaElement | null>(null);
 
-  const heading = (size = "4.5cqi") => (
-    <h3
-      style={{
-        fontFamily: `'${t.displayFont}', sans-serif`,
-        fontSize: size,
-        fontWeight: 800,
-        lineHeight: 1.12,
-        letterSpacing: "-0.01em",
-        margin: "1.7cqi 0 2.6cqi",
-        color: t.ink,
-        overflow: "hidden",
-        display: "-webkit-box",
-        WebkitLineClamp: 2,
-        WebkitBoxOrient: "vertical",
-      }}
-    >
-      {slide.title || "Untitled"}
-    </h3>
-  );
+  useEffect(() => setDraft(value), [value]);
 
-  const Bullet = ({ text }: { text: string }) => (
-    <li style={{ display: "flex", gap: "1.7cqi", alignItems: "baseline" }}>
+  const commit = () => {
+    setEditing(false);
+    const v = draft.trim();
+    if (v && v !== value) onCommit(v);
+    else setDraft(value);
+  };
+  const cancel = () => {
+    setDraft(value);
+    setEditing(false);
+  };
+  const keys = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter" && (!multiline || e.metaKey || e.ctrlKey)) {
+      e.preventDefault();
+      commit();
+    } else if (e.key === "Enter" && !multiline) {
+      e.preventDefault();
+      commit();
+    } else if (e.key === "Escape") {
+      e.stopPropagation();
+      cancel();
+    }
+  };
+
+  if (!editable) {
+    return <span className={className}>{value || placeholder}</span>;
+  }
+  if (!editing) {
+    return (
       <span
-        style={{
-          width: "1.05cqi",
-          height: "1.05cqi",
-          background: t.accent,
-          flexShrink: 0,
-          transform: "translateY(-0.25cqi)",
+        className={`inline-edit ${className} ${value ? "" : "opacity-50 italic"}`}
+        onClick={(e) => {
+          e.stopPropagation();
+          setEditing(true);
+          requestAnimationFrame(() => {
+            (ref.current ?? areaRef.current)?.focus();
+            (ref.current ?? areaRef.current)?.select?.();
+          });
         }}
+        title="Click to edit"
+      >
+        {value || placeholder}
+      </span>
+    );
+  }
+  const cls = `w-full min-w-0 bg-transparent outline-none ${className}`;
+  const glow = { boxShadow: "0 0 0 2px var(--ring)" } as CSSProperties;
+  return multiline ? (
+    <textarea
+      ref={areaRef}
+      value={draft}
+      rows={rows}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={keys}
+      className={`${cls} resize-none`}
+      style={glow}
+    />
+  ) : (
+    <input
+      ref={ref}
+      value={draft}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={keys}
+      className={cls}
+      style={glow}
+    />
+  );
+}
+
+/* ------------------------------ bullet row ------------------------------ */
+
+function BulletRow({
+  text,
+  index,
+  editable,
+  fontSize,
+  onEdit,
+  onRemove,
+}: {
+  text: string;
+  index: number;
+  editable: boolean;
+  fontSize: number;
+  onEdit: (v: string) => void;
+  onRemove: () => void;
+}) {
+  return (
+    <li className="group flex items-start gap-4" style={{ fontSize }}>
+      <span
+        className="mt-[0.62em] h-[9px] w-[9px] shrink-0 rounded-[2.5px]"
+        style={{ background: "var(--accent)" }}
       />
-      <span style={{ lineHeight: 1.45, minWidth: 0 }}>{text}</span>
+      <div className="min-w-0 flex-1">
+        <InlineText value={text} editable={editable} onCommit={onEdit} />
+      </div>
+      {editable && (
+        <button
+          onClick={onRemove}
+          className="-mr-2 mt-[0.35em] rounded p-1 opacity-0 transition-opacity hover:text-[var(--ember,#cf4a2b)] group-hover:opacity-70"
+          title="Remove point"
+          aria-label={`Remove point ${index + 1}`}
+          style={{ color: "var(--muted)" }}
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round">
+            <path d="m6 6 12 12M18 6 6 18" />
+          </svg>
+        </button>
+      )}
     </li>
   );
+}
 
-  let content: React.ReactNode;
-  const rail =
-    slide.layout === "title" ? (
-      <span style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: "1.5cqi", background: t.accent }} />
-    ) : null;
-
-  switch (slide.layout) {
-    case "title":
-      content = (
-        <div style={{ height: "100%", display: "flex", flexDirection: "column", justifyContent: "center" }}>
-          <span style={{ width: "9cqi", height: "0.55cqi", background: t.accent2, marginBottom: "3.2cqi" }} />
-          <h3
-            style={{
-              fontFamily: `'${t.displayFont}', sans-serif`,
-              fontSize: "7cqi",
-              fontWeight: 800,
-              lineHeight: 1.05,
-              letterSpacing: "-0.015em",
-              color: t.ink,
-              margin: 0,
-            }}
+function BulletList({
+  slide,
+  editable,
+  fontSize,
+  onPatch,
+}: {
+  slide: SlideData;
+  editable: boolean;
+  fontSize: number;
+  onPatch?: (p: Partial<SlideData>) => void;
+}) {
+  const set = (bullets: string[]) => onPatch?.({ bullets });
+  return (
+    <ul className="space-y-[18px]">
+      {slide.bullets.map((b, i) => (
+        <BulletRow
+          key={i}
+          index={i}
+          text={b}
+          editable={editable}
+          fontSize={fontSize}
+          onEdit={(v) => set(slide.bullets.map((x, j) => (j === i ? v : x)))}
+          onRemove={() => set(slide.bullets.filter((_, j) => j !== i))}
+        />
+      ))}
+      {editable && slide.bullets.length < 6 && (
+        <li>
+          <button
+            onClick={() => set([...slide.bullets, "New point"])}
+            className="inline-flex items-center gap-2 rounded-md px-2 py-1 text-[14px] font-medium opacity-45 transition-opacity hover:opacity-100"
+            style={{ color: "var(--accent)" }}
           >
-            {slide.title || "Untitled deck"}
-          </h3>
-          {slide.subtitle && (
-            <p style={{ fontSize: "2.6cqi", color: t.muted, marginTop: "2.6cqi", maxWidth: "82%", lineHeight: 1.5 }}>
-              {slide.subtitle}
-            </p>
-          )}
-        </div>
-      );
-      break;
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round">
+              <path d="M12 5v14M5 12h14" />
+            </svg>
+            Add point
+          </button>
+        </li>
+      )}
+    </ul>
+  );
+}
 
-    case "quote":
-      content = (
-        <div style={{ height: "100%", display: "flex", flexDirection: "column", justifyContent: "center", paddingLeft: "1cqi" }}>
-          <span style={{ width: "8cqi", height: "0.55cqi", background: t.accent, marginBottom: "3cqi" }} />
-          <p
-            style={{
-              fontFamily: `'${t.displayFont}', sans-serif`,
-              fontSize: "3.9cqi",
-              fontStyle: "italic",
-              fontWeight: 600,
-              lineHeight: 1.32,
-              color: t.ink,
-              margin: 0,
-              maxWidth: "95%",
-            }}
-          >
-            “{slide.quote?.text || slide.bullets[0] || slide.title}”
-          </p>
-          {slide.quote?.attribution && (
-            <p style={{ fontSize: "2.2cqi", color: t.muted, marginTop: "2.6cqi" }}>— {slide.quote.attribution}</p>
-          )}
-        </div>
-      );
-      break;
+/* ------------------------------ stat cards ------------------------------ */
 
-    case "stats": {
-      const stats =
-        slide.stats && slide.stats.length
-          ? slide.stats.slice(0, 3)
-          : slide.bullets.slice(0, 3).map((b) => ({ value: b.split(" ").slice(0, 3).join(" "), label: b.split(" ").slice(3, 9).join(" ") }));
-      content = (
-        <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
-          {kicker}
-          {heading()}
-          <div style={{ display: "flex", gap: "2.6cqi", flex: 1, minHeight: 0, marginTop: "1cqi" }}>
-            {stats.map((st, i) => (
-              <div
-                key={i}
-                style={{
-                  flex: 1,
-                  background: t.surface,
-                  border: `1px solid ${t.line}`,
-                  borderTop: `0.55cqi solid ${i % 2 ? t.accent2 : t.accent}`,
-                  borderRadius: "1cqi",
-                  padding: "2.8cqi 1.8cqi",
-                  display: "flex",
-                  flexDirection: "column",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  textAlign: "center",
-                  gap: "1.6cqi",
-                  overflow: "hidden",
-                }}
-              >
-                <span
-                  style={{
-                    fontFamily: `'${t.displayFont}', sans-serif`,
-                    fontSize: "4.9cqi",
-                    fontWeight: 800,
-                    color: i % 2 ? t.accent2 : t.accent,
-                    lineHeight: 1,
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  {st.value || "—"}
-                </span>
-                <span style={{ fontSize: "1.95cqi", color: t.muted, lineHeight: 1.4 }}>{st.label}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      );
-      break;
-    }
-
-    case "two_col": {
-      const half = Math.ceil(slide.bullets.length / 2);
-      const cols = [slide.bullets.slice(0, half), slide.bullets.slice(half)];
-      content = (
-        <div style={{ height: "100%", display: "flex", flexDirection: "column", overflow: "hidden" }}>
-          {kicker}
-          {heading()}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 4.5cqi", flex: 1, minHeight: 0, overflow: "hidden" }}>
-            {cols.map((col, ci) => (
-              <ul key={ci} style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: "1.6cqi", fontSize: bulletSize }}>
-                {col.map((b, i) => (
-                  <Bullet key={i} text={b} />
-                ))}
-              </ul>
-            ))}
-          </div>
-        </div>
-      );
-      break;
-    }
-
-    case "closing":
-      content = (
+function StatBlock({
+  stats,
+  editable,
+  onPatch,
+}: {
+  stats: Stat[];
+  editable: boolean;
+  onPatch?: (p: Partial<SlideData>) => void;
+}) {
+  const set = (stats: Stat[]) => onPatch?.({ stats });
+  return (
+    <div className="flex gap-6">
+      {stats.slice(0, 3).map((st, i) => (
         <div
-          style={{
-            height: "100%",
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            justifyContent: "center",
-            textAlign: "center",
-            overflow: "hidden",
-          }}
+          key={i}
+          className="relative flex-1 overflow-hidden rounded-xl px-7 pb-6 pt-8"
+          style={{ background: "var(--surface)", border: "1px solid var(--line)" }}
         >
-          <h3
-            style={{
-              fontFamily: `'${t.displayFont}', sans-serif`,
-              fontSize: "5.4cqi",
-              fontWeight: 800,
-              color: t.ink,
-              margin: 0,
-              letterSpacing: "-0.01em",
-            }}
-          >
-            {slide.title}
-          </h3>
-          <span style={{ width: "7cqi", height: "0.55cqi", background: t.accent, margin: "2.6cqi auto" }} />
-          {slide.bullets.length > 0 && (
-            <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: "1.3cqi", fontSize: "2.35cqi", color: t.muted }}>
-              {slide.bullets.slice(0, 4).map((b, i) => (
-                <li key={i}>{b}</li>
-              ))}
-            </ul>
-          )}
+          <span className="absolute left-0 top-0 h-[4px] w-full" style={{ background: "var(--accent)" }} />
+          <div className="font-display text-[42px] font-extrabold leading-none tracking-tight" style={{ color: "var(--accent)" }}>
+            <InlineText
+              value={st.value}
+              editable={editable}
+              onCommit={(v) => set(stats.map((x, j) => (j === i ? { ...x, value: v } : x)))}
+            />
+          </div>
+          <div className="mt-3 text-[15px] leading-snug" style={{ color: "var(--muted)" }}>
+            <InlineText
+              value={st.label}
+              editable={editable}
+              onCommit={(v) => set(stats.map((x, j) => (j === i ? { ...x, label: v } : x)))}
+            />
+          </div>
         </div>
-      );
-      break;
+      ))}
+    </div>
+  );
+}
 
-    default:
-      content = (
-        <div style={{ height: "100%", display: "flex", flexDirection: "column", overflow: "hidden" }}>
-          {kicker}
-          {heading()}
-          <ul
-            style={{
-              listStyle: "none",
-              margin: 0,
-              padding: 0,
-              display: "flex",
-              flexDirection: "column",
-              gap: "1.7cqi",
-              fontSize: bulletSize,
-              flex: 1,
-              minHeight: 0,
-              overflow: "hidden",
-            }}
-          >
-            {slide.bullets.map((b, i) => (
-              <Bullet key={i} text={b} />
-            ))}
-          </ul>
-        </div>
-      );
-  }
+/* ------------------------------ the card ------------------------------ */
 
-  const wrapperStyle: CSSProperties = {
-    containerType: "inline-size",
-    position: "relative",
-    cursor: onSelect ? "pointer" : undefined,
-  };
+function Watermark({ color }: { color: string }) {
+  return (
+    <svg
+      className="pointer-events-none absolute -bottom-16 -right-10"
+      width="340"
+      height="340"
+      viewBox="0 0 24 24"
+      fill={color}
+      opacity="0.07"
+    >
+      <path d="M13 2 4.5 13.5H11L9.5 22 19 10.5h-6.5L13 2Z" />
+    </svg>
+  );
+}
 
-  const cardStyle: CSSProperties = {
-    aspectRatio: "16 / 9",
-    background: t.bg,
-    color: t.ink,
-    fontFamily: `'${t.bodyFont}', sans-serif`,
-    borderRadius: "12px",
-    border: `1px solid ${t.mode === "light" ? "rgba(22,28,29,0.14)" : "rgba(255,255,255,0.1)"}`,
-    overflow: "hidden",
-    position: "relative",
-    padding: "5.2cqi 6cqi 7.5cqi",
-    transition: "transform 0.22s cubic-bezier(0.22,1,0.36,1), box-shadow 0.22s ease",
-    boxShadow: selected
-      ? "0 0 0 2.5px #2fd4b5, 0 24px 50px -20px rgba(0,0,0,0.55)"
-      : "0 14px 34px -18px rgba(0,0,0,0.45)",
-  };
+export default function SlideCard({
+  slide,
+  deckTitle,
+  theme,
+  width,
+  interactive = false,
+  onPatch,
+  toolbar,
+  showNumber = true,
+  className = "",
+}: SlideCardProps) {
+  const scale = width / W;
+  const vars = {
+    "--surface": theme.surface,
+    "--muted": theme.muted,
+    "--accent": theme.accent,
+    "--accent2": theme.accent2,
+    "--line": theme.line,
+    "--hov": theme.mode === "dark" ? "rgba(255,255,255,0.09)" : "rgba(20,35,32,0.07)",
+    "--ring": `color-mix(in srgb, ${theme.accent} 50%, transparent)`,
+    background: theme.bg,
+    color: theme.ink,
+  } as CSSProperties;
+
+  const patch = (p: Partial<SlideData>) => onPatch?.(p);
+  const bulletSize = slide.bullets.length > 4 ? 18 : 21;
 
   return (
     <div
-      style={wrapperStyle}
-      onClick={onSelect}
-      role={onSelect ? "button" : undefined}
-      tabIndex={onSelect ? 0 : undefined}
-      onKeyDown={onSelect ? (e) => e.key === "Enter" && onSelect() : undefined}
-      className={onSelect ? "group" : undefined}
+      className={`relative overflow-hidden rounded-xl ${className}`}
+      style={{ width, height: Math.round(width * 0.5625), boxShadow: "var(--shadow-card)", ...vars }}
     >
-      <div style={cardStyle} className={onSelect ? "transition-transform group-hover:-translate-y-1" : undefined}>
-        {rail}
-        {content}
-        <div
-          style={{
-            position: "absolute",
-            left: "6cqi",
-            right: "6cqi",
-            bottom: "2.4cqi",
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            fontSize: "1.7cqi",
-            color: t.muted,
-            opacity: 0.9,
-          }}
-        >
-          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "70%" }}>
-            {deckTitle || "Untitled deck"}
-          </span>
-          <span style={{ fontFamily: "'JetBrains Mono', monospace" }}>
-            {String(index + 1).padStart(2, "0")} / {String(total).padStart(2, "0")}
-          </span>
-        </div>
+      <div
+        className="absolute left-0 top-0"
+        style={{ width: W, height: H, transform: `scale(${scale})`, transformOrigin: "0 0" }}
+      >
+        {/* ---------- title ---------- */}
+        {slide.layout === "title" && (
+          <div className="relative flex h-full flex-col justify-center px-[72px]">
+            <Watermark color={theme.accent} />
+            <div
+              className="mb-5 truncate text-[13px] font-bold uppercase tracking-[0.32em]"
+              style={{ color: theme.accent }}
+            >
+              {deckTitle}
+            </div>
+            <div className="font-display text-[54px] font-extrabold leading-[1.06] tracking-tight">
+              <InlineText value={slide.title} editable={interactive} onCommit={(v) => patch({ title: v })} />
+            </div>
+            <div className="mt-6 max-w-[720px] text-[20px] leading-relaxed" style={{ color: theme.muted }}>
+              <InlineText value={slide.subtitle ?? ""} editable={interactive} onCommit={(v) => patch({ subtitle: v })} />
+            </div>
+            <span className="mt-9 h-[5px] w-[76px] rounded-full" style={{ background: theme.accent }} />
+          </div>
+        )}
+
+        {/* ---------- quote ---------- */}
+        {slide.layout === "quote" && (
+          <div className="relative flex h-full flex-col justify-center px-[80px]">
+            <div
+              className="font-display absolute left-[44px] top-[54px] text-[150px] font-extrabold leading-none"
+              style={{ color: theme.accent, opacity: 0.32 }}
+            >
+              “
+            </div>
+            <div className="relative text-[30px] font-medium italic leading-[1.4]">
+              <InlineText
+                value={slide.quote?.text ?? ""}
+                editable={interactive}
+                multiline
+                rows={3}
+                onCommit={(v) => patch({ quote: { text: v, attribution: slide.quote?.attribution ?? "" } })}
+                placeholder="Add a quote…"
+              />
+            </div>
+            <div className="mt-7 flex items-center gap-3 text-[16px]" style={{ color: theme.muted }}>
+              <span className="h-[3px] w-[36px] rounded-full" style={{ background: theme.accent }} />
+              <InlineText
+                value={slide.quote?.attribution ?? ""}
+                editable={interactive}
+                onCommit={(v) => patch({ quote: { text: slide.quote?.text ?? "", attribution: v } })}
+                placeholder="Attribution"
+              />
+            </div>
+          </div>
+        )}
+
+        {/* ---------- stats ---------- */}
+        {slide.layout === "stats" && (
+          <div className="flex h-full flex-col px-[72px] pt-[64px]">
+            <CardHeader slide={slide} deckTitle={deckTitle} theme={theme} interactive={interactive} onPatch={onPatch} />
+            <div className="mt-10">
+              <StatBlock stats={slide.stats ?? []} editable={interactive} onPatch={onPatch} />
+            </div>
+            {slide.bullets.length > 0 && (
+              <div className="mt-8 text-[16px]" style={{ color: theme.muted }}>
+                <InlineText value={slide.bullets[0]} editable={interactive} onCommit={(v) => patch({ bullets: [v, ...slide.bullets.slice(1)] })} />
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ---------- two column ---------- */}
+        {slide.layout === "two_col" && (
+          <div className="flex h-full flex-col px-[72px] pt-[64px]">
+            <CardHeader slide={slide} deckTitle={deckTitle} theme={theme} interactive={interactive} onPatch={onPatch} />
+            <div className="mt-8 grid flex-1 grid-cols-2 gap-12">
+              {[0, 1].map((col) => {
+                const half = Math.ceil(slide.bullets.length / 2);
+                const items = col === 0 ? slide.bullets.slice(0, half) : slide.bullets.slice(half);
+                const offset = col === 0 ? 0 : half;
+                return (
+                  <ul key={col} className="space-y-4">
+                    {items.map((b, i) => (
+                      <BulletRow
+                        key={i}
+                        index={offset + i}
+                        text={b}
+                        editable={interactive}
+                        fontSize={18}
+                        onEdit={(v) => patch({ bullets: slide.bullets.map((x, j) => (j === offset + i ? v : x)) })}
+                        onRemove={() => patch({ bullets: slide.bullets.filter((_, j) => j !== offset + i) })}
+                      />
+                    ))}
+                  </ul>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* ---------- closing ---------- */}
+        {slide.layout === "closing" && (
+          <div className="relative flex h-full flex-col items-center justify-center px-[90px] text-center">
+            <Watermark color={theme.accent} />
+            <div className="font-display relative text-[42px] font-extrabold leading-tight tracking-tight">
+              <InlineText value={slide.title} editable={interactive} onCommit={(v) => patch({ title: v })} />
+            </div>
+            <span className="relative mt-5 h-[4px] w-[64px] rounded-full" style={{ background: theme.accent }} />
+            {slide.bullets.length > 0 && (
+              <ul className="relative mt-8 space-y-3.5">
+                {slide.bullets.map((b, i) => (
+                  <li key={i} className="flex items-center justify-center gap-3 text-[18px]">
+                    <span className="h-[7px] w-[7px] rotate-45 rounded-[2px]" style={{ background: theme.accent }} />
+                    <InlineText
+                      value={b}
+                      editable={interactive}
+                      onCommit={(v) => patch({ bullets: slide.bullets.map((x, j) => (j === i ? v : x)) })}
+                    />
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
+
+        {/* ---------- bullets (default) ---------- */}
+        {(slide.layout === "bullets" || !["title", "quote", "stats", "two_col", "closing"].includes(slide.layout)) && (
+          <div className="flex h-full flex-col px-[72px] pt-[64px]">
+            <CardHeader slide={slide} deckTitle={deckTitle} theme={theme} interactive={interactive} onPatch={onPatch} />
+            <div className="mt-8">
+              <BulletList slide={slide} editable={interactive} fontSize={bulletSize} onPatch={onPatch} />
+            </div>
+          </div>
+        )}
+
+        {/* ---------- slide footer ---------- */}
+        {showNumber && (
+          <div
+            className="absolute bottom-[22px] left-[72px] right-[72px] flex items-center justify-between text-[12px]"
+            style={{ color: theme.muted, opacity: 0.85 }}
+          >
+            <span className="truncate">{deckTitle}</span>
+            <span className="font-mono">{String(slide.slide_number).padStart(2, "0")}</span>
+          </div>
+        )}
       </div>
+
+      {toolbar}
+    </div>
+  );
+}
+
+function CardHeader({
+  slide,
+  deckTitle,
+  theme,
+  interactive,
+  onPatch,
+}: {
+  slide: SlideData;
+  deckTitle: string;
+  theme: DeckTheme;
+  interactive: boolean;
+  onPatch?: (p: Partial<SlideData>) => void;
+}) {
+  return (
+    <div>
+      <div className="text-[12px] font-bold uppercase tracking-[0.28em]" style={{ color: theme.accent }}>
+        {deckTitle}
+      </div>
+      <div className="font-display mt-3 text-[33px] font-bold leading-tight tracking-tight">
+        <InlineText value={slide.title} editable={interactive} onCommit={(v) => onPatch?.({ title: v })} />
+      </div>
+      <span className="mt-4 block h-[4px] w-[46px] rounded-full" style={{ background: theme.accent }} />
     </div>
   );
 }
