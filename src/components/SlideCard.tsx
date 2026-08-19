@@ -5,7 +5,7 @@
 
 import { CSSProperties, ReactNode, useEffect, useRef, useState } from "react";
 import { DeckTheme } from "../lib/themes";
-import { SlideData, Stat } from "../lib/types";
+import { SlideData, Stat, wordCount } from "../lib/types";
 
 const W = 960;
 const H = 540;
@@ -429,15 +429,21 @@ export default function SlideCard({
         )}
 
         {/* ---------- slide footer ---------- */}
-        {showNumber && (
-          <div
-            className="absolute bottom-[22px] left-[72px] right-[72px] flex items-center justify-between text-[12px]"
-            style={{ color: theme.muted, opacity: 0.85 }}
-          >
+        <div
+          className="absolute bottom-[22px] left-[72px] right-[72px] flex items-center justify-between gap-3 text-[12px]"
+          style={{ color: theme.muted, opacity: 0.85 }}
+        >
+          <span className="flex min-w-0 items-center gap-2">
             <span className="truncate">{deckTitle}</span>
-            <span className="font-mono">{String(slide.slide_number).padStart(2, "0")}</span>
-          </div>
-        )}
+            <span className="opacity-50">·</span>
+            <span className="shrink-0 font-mono text-[10.5px]">
+              {wordCount([slide.title, ...(slide.bullets ?? [])].join(" "))} words
+            </span>
+          </span>
+          {showNumber && (
+            <span className="shrink-0 font-mono">{String(slide.slide_number).padStart(2, "0")}</span>
+          )}
+        </div>
       </div>
 
       {toolbar}

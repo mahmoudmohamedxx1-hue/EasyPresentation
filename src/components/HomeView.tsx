@@ -14,6 +14,7 @@ import {
   IconBolt,
   IconClock,
   IconCode,
+  IconCopy,
   IconFile,
   IconLayers,
   IconSpinner,
@@ -36,6 +37,7 @@ interface Props {
   onText: (text: string, name: string) => void;
   onImport: (file: File) => void;
   onOpen: (r: RecentDeck) => void;
+  onDuplicateRecent: (id: string) => void;
   onDeleteRecent: (id: string) => void;
   onBlueprint: () => void;
 }
@@ -75,6 +77,7 @@ export default function HomeView({
   onText,
   onImport,
   onOpen,
+  onDuplicateRecent,
   onDeleteRecent,
   onBlueprint,
 }: Props) {
@@ -372,17 +375,30 @@ export default function HomeView({
                           {r.deck.slides.length} cards · {timeAgo(r.savedAt)}
                         </div>
                       </div>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onDeleteRecent(r.id);
-                        }}
-                        className="rounded-md p-1.5 text-mist opacity-0 transition-all hover:bg-ember/10 hover:text-ember group-hover:opacity-100"
-                        title="Delete deck"
-                        aria-label="Delete deck"
-                      >
-                        <IconTrash size={15} />
-                      </button>
+                      <div className="flex shrink-0 items-center gap-0.5">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onDuplicateRecent(r.id);
+                          }}
+                          className="rounded-md p-1.5 text-mist opacity-0 transition-all hover:bg-moss/10 hover:text-moss-deep group-hover:opacity-100"
+                          title="Duplicate deck"
+                          aria-label="Duplicate deck"
+                        >
+                          <IconCopy size={15} />
+                        </button>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onDeleteRecent(r.id);
+                          }}
+                          className="rounded-md p-1.5 text-mist opacity-0 transition-all hover:bg-ember/10 hover:text-ember group-hover:opacity-100"
+                          title="Delete deck"
+                          aria-label="Delete deck"
+                        >
+                          <IconTrash size={15} />
+                        </button>
+                      </div>
                     </div>
                   </div>
                 ))}
