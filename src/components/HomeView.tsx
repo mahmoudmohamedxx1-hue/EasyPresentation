@@ -6,8 +6,9 @@ import { useRef, useState } from "react";
 import { Deck } from "../lib/types";
 import { getTheme } from "../lib/themes";
 import { SAMPLES } from "../lib/samples";
-import { supportedFile } from "../lib/extract";
 import SlideCard from "./SlideCard";
+
+const supportedFile = (name: string) => /\.(pdf|docx|txt|md)$/i.test(name);
 import { useWidth } from "./useWidth";
 import {
   IconArrowRight,

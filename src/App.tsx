@@ -1,12 +1,14 @@
 /* ------------------------------------------------------------------ */
 /*  SlideForge — Gamma-style AI presentation studio.                   */
-/*  Flow: Home → Outline → Theme → Editor (⇄ Present) → Export/Share   */
+/*  Flow: Home → Outline → Theme → Editor ⇄ Present.                   */
+/*  Undo/redo history, autosave, share links, staged generation.       */
 /* ------------------------------------------------------------------ */
 
 import { Component, ReactNode, useCallback, useEffect, useRef, useState } from "react";
-import { Deck, seedLayoutPatch, SlideData, uid } from "./lib/types";
+import { Deck, DEFAULT_SETTINGS, EngineSettings, renumber, SlideData, uid } from "./lib/types";
 import { buildDeckFromText } from "./lib/engine";
 import { buildTopicDeck } from "./lib/topicDeck";
+import { applyInstruction } from "./lib/aiChat";
 import { readDeckFromHash } from "./lib/share";
 import HomeView, { RecentDeck } from "./components/HomeView";
 import OutlineView from "./components/OutlineView";
@@ -14,28 +16,11 @@ import ThemeView from "./components/ThemeView";
 import EditorView from "./components/EditorView";
 import PresentView from "./components/PresentView";
 import BlueprintDrawer from "./components/BlueprintDrawer";
-import { IconAlert, IconBolt, IconCheck } from "./components/icons";
+import { IconBolt, IconCheck, IconSpinner } from "./components/icons";
 
-/* ------------------------------ persistence ------------------------------ */
+type View = "home" | "outline" | "theme" | "editor" | "present";
 
-const K_RECENT = "sf.recent.v1";
-const K_CURRENT = "sf.current.v1";
-
-function load<T>(key: string, fallback: T): T {
-  try {
-    const raw = localStorage.getItem(key);
-    return raw ? (JSON.parse(raw) as T) : fallback;
-  } catch {
-    return fallback;
-  }
-}
-function save(key: string, value: unknown): void {
-  try {
-    localStorage.setItem(key, JSON.stringify(value));
-  } catch {
-    /* storage full / private mode — the session still works */
-  }
-}
+const STAGES = ["Reading your source", "Mapping the structure", "Writing cards", "Polishing design"];
 
 /* ------------------------------ error boundary ------------------------------ */
 
@@ -45,258 +30,345 @@ class Boundary extends Component<{ children: ReactNode }, { error: Error | null 
     return { error };
   }
   render() {
-    if (!this.state.error) return this.props.children;
-    return (
-      <div className="dot-grid flex min-h-dvh items-center justify-center bg-paper p-6">
-        <div className="w-full max-w-md rounded-xl border border-line bg-white p-8 text-center shadow-card">
-          <span className="mx-auto grid h-12 w-12 place-items-center rounded-xl bg-ember/10 text-ember">
-            <IconAlert size={24} />
-          </span>
-          <h1 className="font-display mt-4 text-xl font-bold">Something went sideways</h1>
-          <p className="mt-2 text-sm leading-relaxed text-mist">
-            The studio hit an unexpected error. Your decks are saved locally — reloading will
-            bring you right back.
-          </p>
-          <p className="mt-3 rounded-lg bg-paper-2 px-3 py-2 font-mono text-[11px] text-mist">
-            {String(this.state.error?.message ?? this.state.error)}
-          </p>
-          <button onClick={() => window.location.reload()} className="btn btn-primary mx-auto mt-5">
-            Reload studio
-          </button>
+    if (this.state.error) {
+      return (
+        <div className="grid min-h-[100dvh] place-items-center bg-paper p-6">
+          <div className="w-full max-w-[440px] rounded-2xl border border-line bg-white p-7 text-center shadow-lift">
+            <div className="mx-auto grid h-12 w-12 place-items-center rounded-xl bg-ember/10 text-ember">
+              <IconBolt size={22} />
+            </div>
+            <h1 className="font-display mt-4 text-lg font-bold">Something broke in the studio</h1>
+            <p className="mt-2 text-[13.5px] leading-relaxed text-mist">
+              Your deck is safe — it autosaves locally. Reload to pick up exactly where you left off.
+            </p>
+            <p className="mt-3 break-all rounded-lg bg-paper px-3 py-2 font-mono text-[11px] text-mist">
+              {String(this.state.error)}
+            </p>
+            <button onClick={() => window.location.reload()} className="btn btn-primary mt-5 w-full">
+              Reload SlideForge
+            </button>
+          </div>
         </div>
-      </div>
-    );
+      );
+    }
+    return this.props.children;
   }
 }
 
-/* ------------------------------ toasts ------------------------------ */
+/* ------------------------------ generation overlay ------------------------------ */
 
-interface Toast {
-  id: string;
-  kind: "ok" | "warn" | "err";
-  msg: string;
-}
-
-function Toasts({ items }: { items: Toast[] }) {
+function GenOverlay({ stage }: { stage: number }) {
   return (
-    <div className="pointer-events-none fixed bottom-5 right-5 z-[70] flex w-[min(92vw,380px)] flex-col gap-2">
-      {items.map((t) => (
-        <div
-          key={t.id}
-          className={`toast-in pointer-events-auto flex items-start gap-2.5 rounded-xl border px-3.5 py-3 text-[13px] font-medium shadow-card backdrop-blur ${
-            t.kind === "ok"
-              ? "border-moss/40 bg-moss-soft/95 text-moss-deep"
-              : t.kind === "warn"
-                ? "border-hon/50 bg-[#fdf3dd]/95 text-hon-deep"
-                : "border-ember/40 bg-[#fbe7e0]/95 text-ember"
-          }`}
-        >
-          <span className="mt-0.5 shrink-0">
-            {t.kind === "ok" ? <IconCheck size={14} strokeWidth={2.6} /> : <IconAlert size={14} />}
+    <div className="fixed inset-0 z-[70] grid place-items-center bg-ink/70 p-6 backdrop-blur-sm">
+      <div className="pop-in w-full max-w-[400px] rounded-2xl border border-ink-3 bg-ink-2 p-7 text-paper shadow-lift">
+        <div className="flex items-center gap-3">
+          <span className="grid h-11 w-11 place-items-center rounded-xl bg-moss text-paper">
+            <IconBolt size={22} />
           </span>
-          {t.msg}
+          <div>
+            <div className="font-display text-[17px] font-bold">Forging your deck</div>
+            <div className="text-[12px] text-paper/60">The slide engine is working</div>
+          </div>
         </div>
-      ))}
+        <div className="mt-6 space-y-3">
+          {STAGES.map((label, i) => (
+            <div key={label} className="flex items-center gap-3">
+              <span
+                className={`grid h-6 w-6 shrink-0 place-items-center rounded-full border transition-all duration-300 ${
+                  i < stage
+                    ? "border-moss bg-moss text-white"
+                    : i === stage
+                    ? "border-hon text-hon"
+                    : "border-ink-3 text-transparent"
+                }`}
+              >
+                {i < stage ? (
+                  <IconCheck size={13} />
+                ) : i === stage ? (
+                  <IconSpinner size={13} />
+                ) : (
+                  <span className="h-1.5 w-1.5 rounded-full bg-ink-3" />
+                )}
+              </span>
+              <span
+                className={`text-[13.5px] font-medium transition-colors duration-300 ${
+                  i <= stage ? "text-paper" : "text-paper/40"
+                }`}
+              >
+                {label}
+              </span>
+            </div>
+          ))}
+        </div>
+        <div className="mt-6 h-1.5 overflow-hidden rounded-full bg-ink-3">
+          <div
+            className="h-full rounded-full bg-moss transition-all duration-700 ease-out"
+            style={{ width: `${Math.min(100, ((stage + 1) / STAGES.length) * 100)}%` }}
+          />
+        </div>
+      </div>
     </div>
   );
 }
 
-/* ------------------------------ app ------------------------------ */
+interface Toast {
+  id: number;
+  kind: "ok" | "err";
+  msg: string;
+}
 
-type View = "home" | "outline" | "theme" | "editor";
+/* ================================== APP ================================== */
 
-function Studio() {
+function AppInner() {
   const [view, setView] = useState<View>("home");
-  const [deck, setDeck] = useState<Deck | null>(null);
+  const [deck, setDeckState] = useState<Deck | null>(null);
+  const [hist, setHist] = useState<{ past: Deck[]; future: Deck[] }>({ past: [], future: [] });
   const [disabledIds, setDisabledIds] = useState<Set<string>>(new Set());
-  const [sourceName, setSourceName] = useState("");
-  const [recents, setRecents] = useState<RecentDeck[]>([]);
-  const [currentId, setCurrentId] = useState<string>("");
-  const [presenting, setPresenting] = useState(false);
+  const [sourceName, setSourceName] = useState("Pasted text");
+  const [recents, setRecents] = useState<RecentDeck[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem("slideforge:recents") ?? "[]");
+    } catch {
+      return [];
+    }
+  });
+  const [settings, setSettings] = useState<EngineSettings>(() => {
+    try {
+      return { ...DEFAULT_SETTINGS, ...JSON.parse(localStorage.getItem("slideforge:settings") ?? "{}") };
+    } catch {
+      return DEFAULT_SETTINGS;
+    }
+  });
+  const [importing, setImporting] = useState(false);
+  const [importLabel, setImportLabel] = useState("");
+  const [genStage, setGenStage] = useState<number | null>(null);
   const [blueprint, setBlueprint] = useState(false);
-  const [pending, setPending] = useState<string | null>(null);
-  const [saveState, setSaveState] = useState<"saved" | "saving">("saved");
   const [toasts, setToasts] = useState<Toast[]>([]);
-  const saveTimer = useRef<number | null>(null);
+  const recentIdRef = useRef<string | null>(null);
+  const saveTimer = useRef<number | undefined>(undefined);
 
-  const toast = useCallback((kind: Toast["kind"], msg: string) => {
-    const id = uid();
-    setToasts((t) => [...t.slice(-3), { id, kind, msg }]);
-    window.setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 4000);
+  const toast = useCallback((kind: "ok" | "err", msg: string) => {
+    const id = Date.now() + Math.random();
+    setToasts((t) => [...t.slice(-2), { id, kind, msg }]);
+    window.setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 3600);
   }, []);
 
-  /* ---------- boot: share link → resume → home ---------- */
+  /* ---------------- load a shared deck from the URL once ---------------- */
   useEffect(() => {
-    setRecents(load<RecentDeck[]>(K_RECENT, []));
-    const linked = readDeckFromHash();
-    if (linked) {
-      const id = uid();
-      setDeck(linked);
-      setCurrentId(id);
+    const shared = readDeckFromHash();
+    if (shared) {
+      setDeckState(shared);
       setView("editor");
-      toast("ok", "Deck loaded from share link — it's yours to edit now.");
-      return;
+      toast("ok", "Shared deck loaded — it's yours to edit now");
     }
-    const cur = load<{ id: string; deck: Deck } | null>(K_CURRENT, null);
-    if (cur?.deck?.slides?.length) {
-      setDeck(cur.deck);
-      setCurrentId(cur.id);
-      setView("editor");
-      toast("ok", "Welcome back — picked up right where you left off.");
-    }
-  }, [toast]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  /* ---------- autosave while editing ---------- */
   useEffect(() => {
-    if (!deck || view !== "editor") return;
-    setSaveState("saving");
-    if (saveTimer.current) window.clearTimeout(saveTimer.current);
+    localStorage.setItem("slideforge:settings", JSON.stringify(settings));
+  }, [settings]);
+
+  /* ---------------- autosave into Recents ---------------- */
+  useEffect(() => {
+    if (!deck) return;
+    const id = recentIdRef.current ?? uid();
+    recentIdRef.current = id;
     saveTimer.current = window.setTimeout(() => {
-      const entry: RecentDeck = { id: currentId || uid(), savedAt: Date.now(), deck };
-      setCurrentId(entry.id);
-      setRecents((r) => [entry, ...r.filter((x) => x.id !== entry.id)].slice(0, 6));
-      save(K_RECENT, [entry, ...load<RecentDeck[]>(K_RECENT, []).filter((x) => x.id !== entry.id)].slice(0, 6));
-      save(K_CURRENT, { id: entry.id, deck });
-      setSaveState("saved");
-    }, 700);
-    return () => {
-      if (saveTimer.current) window.clearTimeout(saveTimer.current);
-    };
-  }, [deck, view, currentId]);
-
-  /* ---------- pipeline entrances ---------- */
-  const openOutline = (d: Deck, source: string, verb: string) => {
-    setDeck(d);
-    setSourceName(source);
-    setDisabledIds(new Set());
-    setView("outline");
-    toast("ok", `${verb} ${d.slides.length} cards from “${source}”.`);
-  };
-
-  const startFromText = (text: string, name: string) => {
-    setPending("Structuring your source…");
-    window.setTimeout(() => {
       try {
-        openOutline(buildDeckFromText(text, name, "auto"), name, "Drafted");
-      } catch (e) {
-        toast("err", e instanceof Error ? e.message : "Couldn't structure that text.");
-      } finally {
-        setPending(null);
-      }
-    }, 620);
-  };
-
-  const startFromTopic = (topic: string, count: number) => {
-    setPending("Drafting an outline…");
-    window.setTimeout(() => {
-      try {
-        openOutline(buildTopicDeck(topic, count), topic, "Drafted");
+        setRecents((rs) => {
+          const next = [{ id, savedAt: Date.now(), deck }, ...rs.filter((r) => r.id !== id)].slice(0, 12);
+          localStorage.setItem("slideforge:recents", JSON.stringify(next));
+          return next;
+        });
       } catch {
-        toast("err", "Couldn't draft that topic — try different wording.");
-      } finally {
-        setPending(null);
+        /* storage quota — the deck still lives in memory */
       }
-    }, 620);
+    }, 600);
+    return () => window.clearTimeout(saveTimer.current);
+  }, [deck]);
+
+  /* ---------------- deck mutation with undo history ---------------- */
+  const mutate = (fn: (d: Deck) => Deck) => {
+    if (!deck) return;
+    const next = fn(deck);
+    if (next === deck) return;
+    setHist((h) => ({ past: [...h.past.slice(-39), deck], future: [] }));
+    setDeckState(next);
   };
 
-  const startFromFile = async (file: File) => {
-    setPending(`Reading ${file.name}…`);
+  const undo = () => {
+    if (!deck || hist.past.length === 0) return;
+    const prev = hist.past[hist.past.length - 1];
+    setHist({ past: hist.past.slice(0, -1), future: [deck, ...hist.future].slice(0, 40) });
+    setDeckState(prev);
+  };
+  const redo = () => {
+    if (!deck || hist.future.length === 0) return;
+    const [next, ...rest] = hist.future;
+    setHist({ past: [...hist.past.slice(-39), deck], future: rest });
+    setDeckState(next);
+  };
+
+  /* ---------------- staged generation ---------------- */
+  const forge = async (doneMsg: string, src: string, work: () => Deck | Promise<Deck>) => {
+    setSourceName(src);
+    setGenStage(0);
+    const tick = window.setInterval(
+      () => setGenStage((s) => (s == null ? s : Math.min(s + 1, STAGES.length - 1))),
+      640
+    );
+    const started = Date.now();
+    try {
+      const result = await work();
+      await new Promise((r) => setTimeout(r, Math.max(0, 950 - (Date.now() - started))));
+      window.clearInterval(tick);
+      setGenStage(null);
+      setDisabledIds(new Set());
+      recentIdRef.current = null;
+      setHist({ past: [], future: [] });
+      setDeckState(result);
+      setView("outline");
+      toast("ok", doneMsg);
+    } catch (e) {
+      window.clearInterval(tick);
+      setGenStage(null);
+      toast("err", e instanceof Error ? e.message : "Generation failed — try again");
+    }
+  };
+
+  /* ---------------- creation entry points ---------------- */
+  const startTopic = (topic: string, count: number) =>
+    forge("Outline ready — review your cards", `Generated from: ${topic}`, () => buildTopicDeck(topic, count));
+
+  const startText = (text: string, name: string) =>
+    forge("Outline ready — review your cards", name || "Pasted text", () =>
+      buildDeckFromText(text, name || "Pasted text", settings.targetSlides)
+    );
+
+  const importFile = async (file: File) => {
+    setImporting(true);
+    setImportLabel(`Extracting text from ${file.name}…`);
     try {
       const { extractTextFromFile } = await import("./lib/extract");
       const { text, truncated } = await extractTextFromFile(file);
-      setPending("Structuring your source…");
-      await new Promise((r) => setTimeout(r, 450));
-      openOutline(buildDeckFromText(text, file.name, "auto"), file.name, "Drafted");
-      if (truncated) toast("warn", "Long document — kept the first ~60k characters.");
+      setImportLabel("Text extracted — forging cards…");
+      await forge(`Parsed ${file.name} — review your outline`, file.name, () =>
+        buildDeckFromText(text, file.name, settings.targetSlides)
+      );
+      if (truncated) toast("ok", "Large document — using the first 60,000 characters");
     } catch (e) {
-      toast("err", e instanceof Error ? e.message : "Couldn't read that file.");
+      toast("err", e instanceof Error ? e.message : "Couldn't read that file");
     } finally {
-      setPending(null);
+      setImporting(false);
+      setImportLabel("");
     }
   };
 
-  /* ---------- outline mutations ---------- */
-  const patchOutlineSlide = (id: string, patch: Partial<SlideData>) =>
-    setDeck((d) =>
-      d
-        ? {
-            ...d,
-            slides: d.slides.map((s) =>
-              s.id === id ? { ...s, ...(patch.layout ? seedLayoutPatch(s, patch.layout) : patch) } : s
-            ),
-          }
-        : d
-    );
-
-  const removeOutlineSlide = (id: string) =>
-    setDeck((d) =>
-      d
-        ? { ...d, slides: d.slides.filter((s) => s.id !== id).map((s, i) => ({ ...s, slide_number: i + 1 })) }
-        : d
-    );
-
-  const addOutlineSlide = () =>
-    setDeck((d) => {
-      if (!d) return d;
-      const fresh: SlideData = {
-        id: uid(),
-        slide_number: 0,
-        layout: "bullets",
-        title: "New card",
-        bullets: ["Make the point in one line", "Back it with a number or example"],
-        notes: "",
-      };
-      const last = d.slides[d.slides.length - 1];
-      const at = last && last.layout === "closing" ? d.slides.length - 1 : d.slides.length;
-      const slides = [...d.slides.slice(0, at), fresh, ...d.slides.slice(at)].map((s, i) => ({
-        ...s,
-        slide_number: i + 1,
-      }));
-      return { ...d, slides };
-    });
-
-  const continueToTheme = () => {
-    setDeck((d) => {
-      if (!d) return d;
-      return { ...d, slides: d.slides.filter((s) => !disabledIds.has(s.id)).map((s, i) => ({ ...s, slide_number: i + 1 })) };
-    });
-    setView("theme");
-  };
-
-  const openEditor = () => {
-    setView("editor");
-    toast("ok", "Deck created — click any text on a card to edit it.");
-  };
-
   const openRecent = (r: RecentDeck) => {
-    setDeck(r.deck);
-    setCurrentId(r.id);
+    recentIdRef.current = r.id;
+    setHist({ past: [], future: [] });
+    setDeckState(r.deck);
     setView("editor");
+  };
+
+  const duplicateRecent = (id: string) => {
+    const src = recents.find((r) => r.id === id);
+    if (!src) return;
+    const copy: RecentDeck = {
+      id: uid(),
+      savedAt: Date.now(),
+      deck: JSON.parse(JSON.stringify(src.deck)),
+    };
+    copy.deck.title = `${copy.deck.title} (copy)`;
+    setRecents((rs) => {
+      const next = [copy, ...rs].slice(0, 12);
+      localStorage.setItem("slideforge:recents", JSON.stringify(next));
+      return next;
+    });
+    toast("ok", "Deck duplicated");
   };
 
   const deleteRecent = (id: string) => {
-    setRecents((r) => r.filter((x) => x.id !== id));
-    save(K_RECENT, load<RecentDeck[]>(K_RECENT, []).filter((x) => x.id !== id));
-    toast("ok", "Deck deleted.");
+    setRecents((rs) => {
+      const next = rs.filter((r) => r.id !== id);
+      localStorage.setItem("slideforge:recents", JSON.stringify(next));
+      return next;
+    });
+    if (recentIdRef.current === id) recentIdRef.current = null;
+    toast("ok", "Deck deleted");
   };
 
-  const goHome = () => {
-    setPresenting(false);
-    setView("home");
+  /* ---------------- editor wiring ---------------- */
+  const patchDeck = (patch: Partial<Deck>) => mutate((d) => ({ ...d, ...patch }));
+  const patchSlide = (id: string, patch: Partial<SlideData>) =>
+    mutate((d) => ({ ...d, slides: d.slides.map((s) => (s.id === id ? { ...s, ...patch } : s)) }));
+  const reorderSlides = (ids: string[]) =>
+    mutate((d) => {
+      const map = new Map(d.slides.map((s) => [s.id, s]));
+      return renumber({ ...d, slides: ids.map((id) => map.get(id)).filter(Boolean) as SlideData[] });
+    });
+  const addSlide = (index?: number) =>
+    mutate((d) => {
+      const fresh: SlideData = {
+        id: uid(),
+        slide_number: 0,
+        title: "New card",
+        bullets: ["Click any text to edit it"],
+        layout: "bullets",
+        notes: "",
+      };
+      const slides = [...d.slides];
+      slides.splice(index ?? slides.length, 0, fresh);
+      return renumber({ ...d, slides });
+    });
+  const duplicateSlide = (id: string) =>
+    mutate((d) => {
+      const i = d.slides.findIndex((s) => s.id === id);
+      if (i < 0) return d;
+      const clone: SlideData = JSON.parse(JSON.stringify(d.slides[i]));
+      clone.id = uid();
+      const slides = [...d.slides];
+      slides.splice(i + 1, 0, clone);
+      return renumber({ ...d, slides });
+    });
+  const removeSlide = (id: string) =>
+    mutate((d) => {
+      if (d.slides.length <= 1) return d;
+      return renumber({ ...d, slides: d.slides.filter((s) => s.id !== id) });
+    });
+
+  const applyChat = async (slideId: string | null, instruction: string): Promise<string> => {
+    if (!deck) return "No deck open.";
+    const { deck: next, reply } = applyInstruction(deck, slideId, instruction);
+    if (next !== deck) mutate(() => next);
+    return reply;
   };
 
-  /* ---------- render ---------- */
+  /* ---------------- outline continue: drop unticked cards ---------------- */
+  const continueFromOutline = () => {
+    if (!deck) return;
+    const kept = deck.slides.filter((s) => !disabledIds.has(s.id));
+    if (kept.length === 0) {
+      toast("err", "Keep at least one card ticked");
+      return;
+    }
+    if (kept.length !== deck.slides.length) mutate((d) => renumber({ ...d, slides: kept }));
+    setView("theme");
+  };
+
+  /* ================================== render ================================== */
   return (
-    <div className="font-body min-h-dvh bg-paper text-ink">
+    <Boundary>
       {view === "home" && (
         <HomeView
           recents={recents}
-          importing={pending !== null}
-          importLabel={pending ?? ""}
-          onTopic={startFromTopic}
-          onText={startFromText}
-          onImport={startFromFile}
+          importing={importing}
+          importLabel={importLabel}
+          onTopic={startTopic}
+          onText={startText}
+          onImport={importFile}
           onOpen={openRecent}
+          onDuplicateRecent={duplicateRecent}
           onDeleteRecent={deleteRecent}
           onBlueprint={() => setBlueprint(true)}
         />
@@ -309,68 +381,74 @@ function Studio() {
           sourceName={sourceName}
           onToggle={(id) =>
             setDisabledIds((s) => {
-              const n = new Set(s);
-              if (n.has(id)) n.delete(id);
-              else n.add(id);
-              return n;
+              const next = new Set(s);
+              if (next.has(id)) next.delete(id);
+              else next.add(id);
+              return next;
             })
           }
-          onPatchSlide={patchOutlineSlide}
-          onRemove={removeOutlineSlide}
-          onAdd={addOutlineSlide}
-          onBack={goHome}
-          onContinue={continueToTheme}
+          onPatchSlide={patchSlide}
+          onRemove={(id) => {
+            removeSlide(id);
+            toast("ok", "Card removed");
+          }}
+          onAdd={() => addSlide()}
+          onBack={() => setView("home")}
+          onContinue={continueFromOutline}
         />
       )}
 
       {view === "theme" && deck && (
-        <ThemeView
-          deck={deck}
-          onTheme={(id) => setDeck((d) => (d ? { ...d, themeId: id } : d))}
-          onBack={() => setView("outline")}
-          onCreate={openEditor}
-        />
+        <ThemeView deck={deck} onTheme={(id) => patchDeck({ themeId: id })} onBack={() => setView("outline")} onCreate={() => setView("editor")} />
       )}
 
       {view === "editor" && deck && (
         <EditorView
           deck={deck}
-          onDeck={setDeck}
-          saveState={saveState}
-          onPresent={() => setPresenting(true)}
-          onHome={goHome}
-          toast={toast}
+          canUndo={hist.past.length > 0}
+          canRedo={hist.future.length > 0}
+          onUndo={undo}
+          onRedo={redo}
+          onPatchDeck={patchDeck}
+          onPatchSlide={patchSlide}
+          onReorder={reorderSlides}
+          onAdd={addSlide}
+          onDuplicate={(id) => {
+            duplicateSlide(id);
+            toast("ok", "Card duplicated");
+          }}
+          onRemove={removeSlide}
+          onApplyChat={applyChat}
+          onPresent={() => setView("present")}
+          onBack={() => setView("home")}
+          onToast={(m) => toast("ok", m)}
         />
       )}
 
-      {presenting && deck && <PresentView deck={deck} onExit={() => setPresenting(false)} />}
+      {view === "present" && deck && <PresentView deck={deck} onExit={() => setView("editor")} />}
 
-      {/* pending overlay */}
-      {pending && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-ink/60 p-6 backdrop-blur-sm">
-          <div className="pop-in w-full max-w-sm rounded-xl border border-line bg-paper p-7 text-center shadow-card">
-            <span className="mx-auto grid h-12 w-12 place-items-center rounded-xl bg-ink text-hon">
-              <IconBolt size={22} className="pulse-dot" />
-            </span>
-            <p className="font-display mt-4 text-[16px] font-bold">{pending}</p>
-            <p className="mt-1 text-[12.5px] text-mist">Sections → titles → bullets → layouts</p>
-            <div className="mt-5 h-[6px] overflow-hidden rounded-full bg-paper-3">
-              <div className="shimmer h-full w-full rounded-full bg-moss" />
-            </div>
-          </div>
-        </div>
-      )}
+      {genStage !== null && <GenOverlay stage={genStage} />}
 
       <BlueprintDrawer open={blueprint} onClose={() => setBlueprint(false)} />
-      <Toasts items={toasts} />
-    </div>
+
+      {/* toasts */}
+      <div className="pointer-events-none fixed bottom-5 left-1/2 z-[80] flex -translate-x-1/2 flex-col items-center gap-2">
+        {toasts.map((t) => (
+          <div
+            key={t.id}
+            className={`toast-in pointer-events-auto flex items-center gap-2.5 rounded-xl border px-4 py-2.5 text-[13px] font-semibold shadow-lift ${
+              t.kind === "ok" ? "border-moss/30 bg-ink text-paper" : "border-ember/40 bg-ember text-white"
+            }`}
+          >
+            {t.kind === "ok" ? <IconCheck size={15} className="text-moss" /> : <IconBolt size={15} />}
+            {t.msg}
+          </div>
+        ))}
+      </div>
+    </Boundary>
   );
 }
 
 export default function App() {
-  return (
-    <Boundary>
-      <Studio />
-    </Boundary>
-  );
+  return <AppInner />;
 }

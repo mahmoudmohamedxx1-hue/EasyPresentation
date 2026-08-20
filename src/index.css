@@ -293,6 +293,37 @@ body {
   background: rgba(47, 212, 181, 0.08);
 }
 
+/* ---------- PDF export via print ---------- */
+.print-only {
+  display: none;
+}
+.print-card {
+  break-after: page;
+  page-break-after: always;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+.print-card:last-child {
+  break-after: auto;
+  page-break-after: auto;
+}
+@media print {
+  @page {
+    size: landscape;
+    margin: 0;
+  }
+  html,
+  body {
+    background: #fff !important;
+  }
+  .no-print {
+    display: none !important;
+  }
+  .print-only {
+    display: block !important;
+  }
+}
+
 /* ---------- gamma-style additions ---------- */
 @keyframes scaleIn {
   from {
